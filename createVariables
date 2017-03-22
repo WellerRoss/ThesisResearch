@@ -1,0 +1,247 @@
+#Create variables
+
+
+#modules
+import sys, os
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import pylab
+import reportlab
+import statsmodels.api as sm
+import scipy as sp
+import sklearn as sk
+import pip
+import patsy
+from statsmodels.formula.api import ols
+
+pd.set_option("display.max_rows",10)
+pd.set_option("display.max_columns",200)
+
+#Run importAndClean script
+#os.system("python C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Thesis/Scripts/1importAndClean.py")
+
+#global variables
+pathData = 'C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data'
+dataFile = 'trimmedThesisData2003_2014.csv'
+
+#import data and read csv
+data = pathData + '/' + dataFile
+dme = pd.read_csv(data, low_memory=False) #read csv
+dm = dme
+
+#Create columns for each play and game to have a unique number/id
+#dm['MinFromStart'] = 60 - dm['MinutesRemaining']
+#dm['unique'] = dm["season"].map(str) + dm["gameid"].map(str) + dm["MinFromStart"].map(str)
+#dm['gameid'] = dm["season"].map(str) + dm["gameid"].map(str) + dm["VisitTeam"].map(str) + dm["HomeTeam"].map(str)
+
+#Fix the NaN values in the end of regulation score columns
+#dnan = dm[np.isnan(dm['Score_Home'])]
+#dnan = dnan.sort(['season','gameid','Sequence'], ascending=[True,True,True])
+playTypeList = pd.get_dummies(dm['PlayCall'], prefix='Play')
+#dm = dm.join(playTypeList)
+dm = pd.concat([dm, playTypeList], axis=1)
+dm = dm.sort(['unique','Down','Play_KO']).reset_index()
+
+dn = pd.DataFrame(dm.groupby(['gameid'], axis=0,  as_index=False)['HomeTeam','VisitTeam','Score_Home','Score_Visitor'].last())
+dn.columns=['gameid','HomeTeam','VisitTeam','ERScore_Home','ERScore_Visitor']
+dm = pd.merge(dm,dn, how='left')
+
+dm['OffEndRegScore'] = dm.apply(lambda x:x['ERScore_Home'] if (x['PossessionTeam'] == x['HomeTeam']) else x['ERScore_Visitor'], axis=1)
+dm['DefEndRegScore'] = dm.apply(lambda x:x['ERScore_Home'] if (x['PossessionTeam'] != x['HomeTeam']) else x['ERScore_Visitor'], axis=1)
+
+dm['OffEndRegScoreMargin'] = dm['OffEndRegScore']-dm['DefEndRegScore']
+dm['DefEndRegScoreMargin'] = dm['DefEndRegScore']-dm['OffEndRegScore']
+
+dm = dm.rename(columns={'ERScore_Home':'HomeEndRegScore','ERScore_Visitor':'AwayEndRegScore','OffEndRegScoreMargin':'OffEndRegSM','DefEndRegScoreMargin':'DefEndRegSM'})
+
+dm['HomeEndRegSM'] = dm['HomeEndRegScore']-dm['AwayEndRegScore']
+dm['AwayEndRegSM'] = dm['AwayEndRegScore']-dm['HomeEndRegScore']
+
+#score margins with respect to the home and away teams
+dm['homeSM'] = dm['Score_Home'] - dm['Score_Visitor']
+dm['awaySM'] = dm['Score_Visitor'] - dm['Score_Home']
+
+#create indicator variable for if the offense is the home team
+dm['isOffHome'] = dm.apply(lambda x:1 if (x['PossessionTeam'] == x['HomeTeam']) else 0, axis=1)
+
+###############################################################################
+#Cleaning data/creating events
+dm['DefSpread'] = dm['OffSpread'] * -1
+dm['OffNonWinInd'] = 1-dm['OffWinInd']
+dm['HomeWinInd'] = dm.apply(lambda x:x['OffWinInd'] if (x['PossessionTeam'] == x['HomeTeam']) else x['OffNonWinInd'], axis=1)
+dm['HomeSpread'] = dm.apply(lambda x:x['OffSpread'] if (x['PossessionTeam'] == x['HomeTeam']) else x['DefSpread'], axis=1)
+vm = dm[['gameid','HomeSpread','HomeWinInd']]
+vm = pd.DataFrame(vm.groupby(['gameid'], axis=0,  as_index=False).last())
+
+#Use point spread to create Vegas win probability
+Y1 = vm['HomeWinInd']
+m1 = ['HomeSpread']
+X1 = sm.add_constant(vm[m1])
+results1 = sm.GLM(Y1, X1, family=sm.families.Binomial()).fit()
+print(results1.summary())
+results1.save("pregameWP.pickle")
+
+#Export results as csv
+result_df = pd.DataFrame({'params': results1.params,
+                              'pvals': results1.pvalues,
+                              'SE': results1.bse})
+result_df.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Thesis/6Results/VegasWinProbLogitResultsSummary.csv") #export data as csv
+
+vm['HomeVegasWinProb']=results1.predict(X1)
+#dm = pd.merge(dm,vm, how='left')
+Xnew = sm.add_constant(dm[m1])
+dm['HomeVegasWinProb'] = results1.predict(Xnew)
+
+dm['AwayVegasWinProb']= 1-dm['HomeVegasWinProb']
+dm['OffVegasWinProb'] = dm.apply(lambda x:x['HomeVegasWinProb'] if (x['PossessionTeam'] == x['HomeTeam']) else x['AwayVegasWinProb'], axis=1)
+dm['DefVegasWinProb'] = 1-dm['AwayVegasWinProb']
+
+dm['HomeVegasWinOdds'] = (dm['HomeVegasWinProb']/(1-dm['HomeVegasWinProb']))
+dm['AwayVegasWinOdds'] = (dm['AwayVegasWinProb']/(1-dm['AwayVegasWinProb']))
+dm['OffVegasWinOdds'] = (dm['OffVegasWinProb']/(1-dm['OffVegasWinProb']))
+dm['DefVegasWinOdds'] = (dm['DefVegasWinProb']/(1-dm['DefVegasWinProb']))
+
+#Get Vegas predicted score for each team
+dm['HomeVegasPredScore'] = (dm['OverUnder']/2) - (dm['HomeSpread']/2)
+dm['AwayVegasPredScore'] = (dm['OverUnder']/2) + (dm['HomeSpread']/2)
+
+dm['OffVegasPredScore'] = dm.apply(lambda x:x['HomeVegasPredScore'] if (x['PossessionTeam'] == x['HomeTeam']) else x['AwayVegasPredScore'], axis=1)
+dm['DefVegasPredScore'] = dm.apply(lambda x:x['AwayVegasPredScore'] if (x['PossessionTeam'] == x['HomeTeam']) else x['HomeVegasPredScore'], axis=1)
+
+dm['HomeVegasPredScore_TimeAdj'] = dm['HomeVegasPredScore'] * (dm['MinutesRemaining'] / 60)
+dm['AwayVegasPredScore_TimeAdj'] = dm['AwayVegasPredScore'] * (dm['MinutesRemaining'] / 60)
+dm['OffVegasPredScore_TimeAdj'] = dm['OffVegasPredScore'] * (dm['MinutesRemaining'] / 60)
+dm['DefVegasPredScore_TimeAdj'] = dm['DefVegasPredScore'] * (dm['MinutesRemaining'] / 60)
+
+
+#dnan = dm[np.isnan(dm['HomeVegasWinProb'])]
+#dnan = dnan.sort(['unique'], ascending=[True])
+
+#create indicators for play type, quarter, and down
+dm['Play_SCRIM']  = dm.apply(lambda x:1 if (x['Play_PASS']==1 or x['Play_RUN']==1) else 0, axis=1)
+
+QuarterList = pd.get_dummies(dm['Quarter'], prefix='Q')
+#dm = dm.join(QuarterList)
+dm = pd.concat([dm, QuarterList], axis=1)
+
+DownList = pd.get_dummies(dm['Down'], prefix='D')
+#dm = dm.join(DownList)
+dm = pd.concat([dm, DownList], axis=1)
+
+#Indicator for if they're in the red zone
+#dm['redZone'] = dm.apply(lambda x:1 if x['AbsoluteYardline'] <= 20 else 0, axis=1) 
+
+#Make an absolute yard line column with respect to the possession team
+dm['HomeAbsYdLine'] = dm.apply(lambda x:x['AbsoluteYardline'] if (x['PossessionTeam'] == x['HomeTeam']) else (100-x['AbsoluteYardline']), axis=1)
+dm = dm.rename(columns={'AbsoluteYardline':'OffAbsYdLine'})
+
+#log of yard line and time and yards to go
+dm['lnhomeydline'] = np.log(dm['HomeAbsYdLine'])
+dm['lnoffydline'] = np.log(dm['OffAbsYdLine'])
+dm['lnminrem'] = np.log(dm['MinutesRemaining'] + 0.0001)
+#dm['lnMinFromStart'] = np.log(dm['MinFromStart'] + 0.0001)
+dm['lnYardsToGo'] = np.log(dm['YardsToGo'] + 0.0001)
+#dm['OffScoreMargin'].describe()
+
+#dinf = dm[np.isinf(dm['lnMinFromStart'])]
+#dinf = dinf.sort(['season','gameid','Sequence'], ascending=[True,True,True])
+#dnan = dm[np.isnan(dm['lnminrem'])]
+#dnan = dnan.sort(['season','gameid','Sequence'], ascending=[True,True,True])
+
+#split the clock time to get minutes and seconds
+secList = pd.DataFrame(dm['ClockTime'].str.split(':',1).tolist(), columns = ['Qmin','Qsec'])
+dm = dm.join(secList)
+dm[['Qmin', 'Qsec']] = dm[['Qmin', 'Qsec']].astype(int)
+
+dm['min'] = '60'
+dm[['min']] = dm[['min']].astype(int)
+dm.loc[dm['Quarter']==1, 'min'] = dm['Qmin'] + (15*3)
+dm.loc[dm['Quarter']==2, 'min'] = dm['Qmin'] + (15*2)
+dm.loc[dm['Quarter']==3, 'min'] = dm['Qmin'] + (15*1)
+dm.loc[dm['Quarter']==4, 'min'] = dm['Qmin'] + (15*0)
+
+dm['SecondsRemaining'] = (dm['min']*60) + dm['Qsec']
+dm['reversemin'] = 60-dm['min']
+
+#Make bins for home score margin
+dm['HomeSMCats'] = pd.cut(dm['homeSM'], bins=[-99,-17,-9,-1,0,8,16,99], labels=['dn3pos','dn2pos','dn1pos','tied','up1pos','up2pos','up3pos'])
+#dm['HomeSMCats'] = pd.cut(dm['homeSM'], bins=[-99,-25,-17,-9,-1,0,8,16,24,99], labels=['dn4pos','dn3pos','dn2pos','dn1pos','tied','up1pos','up2pos','up3pos','up4pos'])
+#dm['HomeSMCats'] = pd.cut(dm['homeSM'], bins=[-99,-1,0,99], labels=['down','tied','up'])
+dm['OffSMCats'] = pd.cut(dm['OffScoreMargin'], bins=[-99,-17,-9,-1,0,8,16,99], labels=['dn3pos','dn2pos','dn1pos','tied','up1pos','up2pos','up3pos'])
+#dm['OffSMCats'] = pd.cut(dm['OffScoreMargin'], bins=[-99,-25,-17,-9,-1,0,8,16,24,99], labels=['dn4pos','dn3pos','dn2pos','dn1pos','tied','up1pos','up2pos','up3pos','up4pos'])
+#dm['OffSMCats'] = pd.cut(dm['OffScoreMargin'], bins=[-99,-1,0,99], labels=['down','tied','up'])
+dm['HomeYdLineCats'] = pd.cut(dm['HomeAbsYdLine'], bins=[0,35,64,99], labels=['FGrange','midFld','ownTerr'])
+dm['OffYdLineCats'] = pd.cut(dm['OffAbsYdLine'], bins=[0,35,64,99], labels=['FGrange','midFld','ownTerr'])
+dm['minRemCats'] = pd.cut(dm['MinutesRemaining'], bins=[0,15,30,45,60], labels=['4Q','3Q','2Q','1Q'])
+dm['downCats'] = pd.cut(dm['Down'], bins=[0,1,2,3,4], labels=['1D','2D','3D','4D'])
+dm['togoCats'] = pd.cut(dm['YardsToGo'], bins=[-1,0.001,3,7,10,99], labels=['NA','1to3','4to7','8to10','11plus'])
+dm['posCats'] = pd.cut(dm['isOffHome'], bins=[-1,0,1], labels=['Away','Home'])
+
+#dm['downCats'] = dm.apply(lambda: if x['Play_KO'] == 1 : print"KO" elif x['Play_XP']==1 : print "XP" else: x['downCats'])
+dm['downCats'] = dm.apply(lambda x: 'KO' if (x['Play_KO'] == 1) else x['downCats'], axis=1)
+dm['downCats'] = dm.apply(lambda x: 'XP' if (x['Play_XP'] == 1) else x['downCats'], axis=1)
+#dm['downCats'].value_counts()
+
+#test = dm[['season','gameid','OffSpread','DefSpread','OffWinInd','OffNonWinInd']]
+#test = pd.DataFrame(test.groupby(['season', 'gameid'], axis=0,  as_index=False).last())
+
+#Create hypothetical next play data based on successful and unsuccessful attempts
+#Successful first down attempt
+dm['npSMFDS'] = dm['OffScoreMargin']
+dm['npMinRemFDS'] = dm['MinutesRemaining'] - 0.1
+dm['npAbsYdLineFDS'] = dm['OffAbsYdLine'] - dm['YardsToGo']
+dm['npDownFDS'] = 1
+dm['npYTGFDS'] = 10
+dm['npPosFDS'] = 1
+
+#Unsuccessful first down attempt
+dm['npSMFDU'] = dm['OffScoreMargin']
+dm['npMinRemFDU'] = dm['MinutesRemaining'] - 0.1
+dm['npAbsYdLineFDU'] = dm['OffAbsYdLine']
+dm['npDownFDU'] = 1
+dm['npYTGFDU'] = 10
+dm['npPosFDU'] = 0
+
+#Successful field goal attempt
+dm['npSMFGS'] = dm['OffScoreMargin'] +3
+dm['npMinRemFGS'] = dm['MinutesRemaining'] - 0.1
+dm['npAbsYdLineFGS'] = 80
+dm['npDownFGS'] = 1
+dm['npYTGFGS'] = 10
+dm['npPosFGS'] = 0
+
+#Unsuccessful field goal attempt
+dm['npSMFGU'] = dm['OffScoreMargin']
+dm['npMinRemFGU'] = dm['MinutesRemaining'] - 0.1
+dm['npAbsYdLineFGU'] = dm.apply(lambda x:20 if (x['OffAbsYdLine']<=20) else (x['OffAbsYdLine'] + 7), axis=1)
+dm['npDownFGU'] = 1
+dm['npYTGFGU'] = 10
+dm['npPosFGU'] = 0
+
+
+#dm.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data/thesisData2003_2014_AddedVariables.csv") #export data as csv
+
+#varlist = dm.columns.tolist()
+dtrim = dm[['unique','season','gameid','HomeTeam','VisitTeam','HomeHeadCoach','VisitorHeadCoach','PossessionTeam','NonPossessionTeam','OffSpread','OverUnder','OffHeadCoach','DefHeadCoach',
+            'Quarter', 'Down', 'YardsToGo', 'OffAbsYdLine', 'MinutesRemaining','OffScoreMargin','DefScoreMargin','OffWinInd','OffLossInd','OffTieInd','PlayCall','Down4Success',
+            'Play_FG','Play_KO','Play_PASS','Play_PUNT','Play_RUN','Play_XP','Play_SCRIM','HomeEndRegScore','AwayEndRegScore','OffEndRegScore','DefEndRegScore','OffEndRegSM',
+            'DefEndRegSM','HomeEndRegSM','AwayEndRegSM','homeSM','awaySM','isOffHome','HomeWinInd','HomeSpread','HomeVegasWinProb','OffVegasWinProb','HomeVegasWinOdds',
+            'AwayVegasWinOdds','OffVegasWinOdds','DefVegasWinOdds','HomeVegasPredScore_TimeAdj','AwayVegasPredScore_TimeAdj','OffVegasPredScore_TimeAdj','DefVegasPredScore_TimeAdj',
+            'Q_1','Q_2','Q_3','Q_4','D_1','D_2','D_3','D_4','HomeAbsYdLine','lnhomeydline','lnoffydline','lnminrem','lnYardsToGo','min','SecondsRemaining','reversemin','HomeSMCats',
+            'OffSMCats','OffYdLineCats','downCats','npSMFDS','npMinRemFDS','npAbsYdLineFDS','npDownFDS','npYTGFDS','npPosFDS','npSMFDU','npMinRemFDU','npAbsYdLineFDU','npDownFDU',
+            'npYTGFDU','npPosFDU','npSMFGS','npMinRemFGS','npAbsYdLineFGS','npDownFGS','npYTGFGS','npPosFGS','npSMFGU','npMinRemFGU','npAbsYdLineFGU','npDownFGU','npYTGFGU',
+            'npPosFGU','TimeoutsRemaining_Home', 'TimeoutsRemaining_Visitor', 'TimeoutsRemaining_Offense','TimeoutsRemaining_Defense']]
+
+dtrim.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data/thesisData2003_2014_AddedVariables_Trim.csv") #export data as csv
+
+#Split data to use for win probability models with different training/validation/test sets
+df6 = dtrim[dtrim['season']<=2008]
+dr6 = dtrim[dtrim['season']>=2009]
+doy = dtrim[(dtrim['season']==2003) | (dtrim['season']==2005) | (dtrim['season']==2007) | (dtrim['season']==2009) | (dtrim['season']==2011) | (dtrim['season']==2013)]
+dey = dtrim[(dtrim['season']==2004) | (dtrim['season']==2006) | (dtrim['season']==2008) | (dtrim['season']==2010) | (dtrim['season']==2012) | (dtrim['season']==2014)]
+
+df6.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data/thesisData2003_2008_AddedVariables_Trim.csv") #export data as csv
+dr6.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data/thesisData2009_2014_AddedVariables_Trim.csv") #export data as csv
+doy.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data/thesisData_OddYears_AddedVariables_Trim.csv") #export data as csv
+dey.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data/thesisData_EvenYears_AddedVariables_Trim.csv") #export data as csv
