@@ -1,0 +1,186 @@
+#Optimal Decision
+
+#modules
+import sys, os
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import pylab
+import statsmodels.api as sm
+import scipy as sp
+import sklearn as sk
+import patsy
+from statsmodels.formula.api import ols
+
+pd.set_option("display.max_rows",10)
+pd.set_option("display.max_columns",200)
+
+#global variables
+pathData = 'C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data'
+dataFile = 'd4evalOptimalDecision2003_2014.csv'
+
+#import data and read csv
+data = pathData + '/' + dataFile
+d4 = pd.read_csv(data, low_memory=False) #read csv
+
+d13 = d4[(d4['season']==2003) | (d4['season']==2005) | (d4['season']==2007) | (d4['season']==2009) | (d4['season']==2011) | (d4['season']==2013)]
+
+#Actual Decision Conditional Likelihood
+#Split fourth down data into wins and non-wins
+d4w = d13[d13['OffWinInd']==1]
+d4l = d13[d13['OffWinInd']==0]
+
+Y6 = d4w['actDec']
+m6 = ['lnminrem','OffScoreMargin','lnoffydline','lnYardsToGo']
+#m6 = ['lnminrem','OffScoreMargin','lnoffydline','lnYardsToGo','isOffHome','TimeoutsRemaining_Home', 'TimeoutsRemaining_Visitor','HomeVegasPredScore_TimeAdj','AwayVegasPredScore_TimeAdj']
+X6 = sm.add_constant(d4w[m6])
+results6 = sm.MNLogit(Y6, X6).fit(method='bfgs')
+print(results6.summary())
+#results6.save("MNL_actDec_win.pickle")
+#results6.params
+
+########################################################################################################################
+########################################################################################################################
+########################################################################################################################
+#
+#STOP HERE TO COPY AND PASTE RESULTS TO A TXT FILE
+#
+########################################################################################################################
+########################################################################################################################
+########################################################################################################################
+
+Xnew = sm.add_constant(d4[m6])
+fitted = pd.DataFrame(results6.predict(Xnew))
+fitted.columns=['FDA','FGA','PNT']
+test = d4[['lnminrem','OffScoreMargin','lnoffydline','lnYardsToGo','actDec','OffAbsYdLine']]
+test = test.reset_index()
+#fitted2 = fitted.reshape((-1,3))
+
+#probs = pd.DataFrame({'FDA':fitted2[:,0],'FGA':fitted2[:,1],'PNT':fitted2[:,2]})
+result = pd.concat([test, fitted], axis=1)
+def func(row):
+    if row['actDec'] == 'FGA':
+        return row['FGA']
+    elif row['actDec'] =='FDA':
+        return row['FDA']
+    else:
+        return row['PNT']
+
+result['OffWinProbDec'] = result.apply(func, axis=1)
+result = result.set_index(['index'])
+#merge = result.drop(['FDA','FGA','PNT'], axis=1)
+merge = result[['FDA','FGA','PNT','OffWinProbDec']]
+merge.columns=['OffWinProbFDA_MNL','OffWinProbFGA_MNL','OffWinProbPNT_MNL','OffWinProbDec']
+
+d4f = pd.merge(d4, merge, left_index=True, right_index=True,)
+
+
+Y7 = d4l['actDec']
+m7 = ['lnminrem','OffScoreMargin','lnoffydline','lnYardsToGo']
+X7 = sm.add_constant(d4l[m7])
+results7 = sm.MNLogit(Y7, X7).fit(method='bfgs')
+print(results7.summary())
+#results7.save("MNL_actDec_loss.pickle")
+
+########################################################################################################################
+########################################################################################################################
+########################################################################################################################
+#
+#STOP HERE TO COPY AND PASTE RESULTS TO A TXT FILE
+#
+########################################################################################################################
+########################################################################################################################
+########################################################################################################################
+
+Xnew = sm.add_constant(d4[m7])
+fitted = pd.DataFrame(results7.predict(Xnew))
+fitted.columns=['FDA','FGA','PNT']
+test = d4[['lnminrem','OffScoreMargin','lnoffydline','lnYardsToGo','actDec','OffAbsYdLine']]
+test = test.reset_index()
+#fitted2 = fitted.reshape((-1,3))
+#probs = pd.DataFrame({'FDA':fitted2[:,0],'FGA':fitted2[:,1],'PNT':fitted2[:,2]})
+result = pd.concat([test, fitted], axis=1)
+
+def func(row):
+    if row['actDec'] == 'FGA':
+        return row['FGA']
+    elif row['actDec'] =='FDA':
+        return row['FDA']
+    else:
+        return row['PNT']
+
+result['DefWinProbDec'] = result.apply(func, axis=1)
+result = result.set_index(['index'])
+#merge = result.drop(['FDA','FGA','PNT'], axis=1)
+merge = result[['FDA','FGA','PNT','DefWinProbDec']]
+merge.columns=['DefWinProbFDA_MNL','DefWinProbFGA_MNL','DefWinProbPNT_MNL','DefWinProbDec']
+
+d4eval = pd.merge(d4f, merge, left_index=True, right_index=True,)
+
+d4eval = d4eval.rename(columns={'actDec_x': 'actDec'})
+d4eval = d4eval.rename(columns={'OffWinProbDec_x': 'OffWinProbDec'})
+
+#Get odds of winning given the decision that was actually made
+d4eval['OffDecCLOdds'] = (d4eval['OffWinProbDec'] / d4eval['DefWinProbDec'])
+d4eval['OffWinOddsDec'] = d4eval['OffWinOdds']*d4eval['OffDecCLOdds']
+#varlist = d4eval.columns.tolist()
+
+d4eval['OffFGACLOdds'] = (d4eval['OffWinProbFGA_MNL'] / d4eval['DefWinProbFGA_MNL'])
+d4eval['OffWinOddsDecFGA'] = d4eval['OffWinOdds']*d4eval['OffFGACLOdds']
+
+d4eval['OffFDACLOdds'] = (d4eval['OffWinProbFDA_MNL'] / d4eval['DefWinProbFDA_MNL'])
+d4eval['OffWinOddsDecFDA'] = d4eval['OffWinOdds']*d4eval['OffFDACLOdds']
+
+d4eval['OffPNTCLOdds'] = (d4eval['OffWinProbPNT_MNL'] / d4eval['DefWinProbPNT_MNL'])
+d4eval['OffWinOddsDecPNT'] = d4eval['OffWinOdds']*d4eval['OffPNTCLOdds']
+
+d4eval.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data/d4evalActDecCL_A.csv") #export data as csv
+
+
+
+
+
+
+
+########################################################################################################################
+########################################################################################################################
+########################################################################################################################
+#
+#######Sandbox for hypothesis testing##########
+#
+########################################################################################################################
+########################################################################################################################
+########################################################################################################################
+
+Y1 = d4w['Play_SCRIM']
+m1 = ['lnminrem','OffScoreMargin','lnoffydline','lnYardsToGo']
+X1 = sm.add_constant(d4w[m1])
+results1 = sm.GLM(Y1, X1, family=sm.families.Binomial()).fit()
+print(results1.summary())
+
+d4w['ProbFDAifOffWin']=results1.predict(X1)
+Xnew = sm.add_constant(d4[m1])
+d4['ProbFDAifOffWin'] = results1.predict(Xnew)
+
+Y2 = d4l['Play_SCRIM']
+m2 = ['lnminrem','OffScoreMargin','lnoffydline','lnYardsToGo']
+X2 = sm.add_constant(d4l[m2])
+results2 = sm.GLM(Y2, X2, family=sm.families.Binomial()).fit()
+print(results2.summary())
+
+d4l['ProbFDAifDefWin']=results2.predict(X2)
+Xnew = sm.add_constant(d4[m2])
+d4['ProbFDAifDefWin'] = results2.predict(Xnew)
+
+d4['FDAoddsCL'] = (d4['ProbFDAifOffWin'] / d4['ProbFDAifDefWin'])
+
+d4['logOddsPrior'] = np.log(d4['OffWinOdds'])
+d4['logOddsCL'] = np.log(d4['FDAoddsCL'])
+
+d4e = d4[(d4['season']==2004) | (d4['season']==2006) | (d4['season']==2008) | (d4['season']==2010) | (d4['season']==2012) | (d4['season']==2014)]
+
+Y3 = d4e['OffWinInd']
+m3 = ['OffWinOdds', 'FDAoddsCL']
+X3 = sm.add_constant(d4e[m3])
+results3 = sm.GLM(Y3, X3, family=sm.families.Binomial()).fit()
+print(results3.summary())
