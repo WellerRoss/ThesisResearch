@@ -1,0 +1,76 @@
+#Bayesian Win Model
+
+
+#modules
+import sys, os
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import pylab
+import statsmodels.api as sm
+import scipy as sp
+import sklearn as sk
+import patsy
+from statsmodels.formula.api import ols
+
+pd.set_option("display.max_rows",10)
+pd.set_option("display.max_columns",200)
+
+#global variables
+pathData = 'C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data'
+#dataFile = 'thesisData2003_2014_deval_Home_FirstSixYearsCL.csv'
+#dataFile = 'thesisData2003_2014_deval_Home_LastSixYearsCL.csv'
+dataFile = 'thesisData2003_2014_deval_Home_OddYearsCL_withTOsandOU.csv'
+#dataFile = 'thesisData2003_2014_deval_Home_EvenYearsCL.csv'
+
+#import data and read csv
+data = pathData + '/' + dataFile
+deval = pd.read_csv(data, low_memory=False) #read csv
+
+###############################################################################
+deval['DefVegasWinProb'] = 1-deval['OffVegasWinProb']
+deval['AwayVegasWinProb'] = 1-deval['HomeVegasWinProb']
+
+#Get the two components: Conditional Likelihood and Prior
+deval['homeCLOdds'] = (deval['homeWinProbSM'] / deval['awayWinProbSM'])
+deval['homePriorOdds'] = (deval['HomeVegasWinProb']) / (deval['AwayVegasWinProb'])
+
+#Bayes in odds form
+deval['HomeWinOddsNumer'] = deval['HomeVegasWinProb'] * deval['homeWinProbSM']
+deval['HomeWinOddsDenom'] = deval['AwayVegasWinProb'] * deval['awayWinProbSM']
+
+deval['HomeWinOdds'] = (deval['homePriorOdds'] * deval['homeCLOdds'])
+#deval['HomeWinOddsChk'] = (deval['HomeWinOddsNumer'] / deval['HomeWinOddsDenom'])
+deval['AwayWinOdds'] = (deval['HomeWinOddsDenom'] / deval['HomeWinOddsNumer'])
+
+deval['OffWinOdds'] = deval.apply(lambda x:x['HomeWinOdds'] if (x['PossessionTeam'] == x['HomeTeam']) else x['AwayWinOdds'], axis=1)
+deval['DefWinOdds'] = deval.apply(lambda x:x['AwayWinOdds'] if (x['PossessionTeam'] == x['HomeTeam']) else x['HomeWinOdds'], axis=1)
+
+#deval.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data/devalBayes2003_2014.csv") #export data as csv
+deval['HomeBayesWinProb'] = (deval['HomeWinOdds'])/(deval['HomeWinOdds']+1)
+deval['OffBayesWinProb'] = (deval['OffWinOdds'])/(deval['OffWinOdds']+1)
+
+#Trim down data set
+#varlist = deval.columns.tolist()
+#devalt=deval[['unique','season','HomeTeam','VisitTeam','HomeHeadCoach','VisitorHeadCoach','PossessionTeam','NonPossessionTeam','OffSpread','OffHeadCoach','DefHeadCoach','Quarter','Down','YardsToGo','HomeAbsYdLine','OffAbsYdLine','MinutesRemaining','OffScoreMargin','DefScoreMargin','OffWinInd','PlayCall','gameid','homeSM','awaySM','isOffHome','HomeWinInd','HomeSpread','HomeVegasWinProb','AwayVegasWinProb','OffVegasWinProb','Play_FG','Play_PASS','Play_PUNT','Play_RUN','Play_SCRIM','Down4Success','lnhomeydline','lnoffydline','lnminrem','lnYardsToGo','SecondsRemaining','reversemin','HomeSMCats','OffSMCats','downCats','homeWinProbSM','awayWinProbSM','HomeCLOdds','homePriorOdds','HomeWinOdds','AwayWinOdds','OffWinOdds','DefWinOdds','HomeBayesWinProb','OffBayesWinProb']]
+devalt=deval[['unique','season','HomeTeam','VisitTeam','HomeHeadCoach','VisitorHeadCoach','PossessionTeam','NonPossessionTeam','OffSpread','OffHeadCoach','DefHeadCoach','Quarter','Down','YardsToGo','HomeAbsYdLine','OffAbsYdLine','MinutesRemaining','OffScoreMargin','DefScoreMargin','OffWinInd','PlayCall','gameid','homeSM','awaySM','isOffHome','HomeWinInd','HomeSpread','HomeVegasWinProb','AwayVegasWinProb','OffVegasWinProb','Play_FG','Play_PASS','Play_PUNT','Play_RUN','Play_SCRIM','Down4Success','lnhomeydline','lnoffydline','lnminrem','lnYardsToGo','SecondsRemaining','reversemin','HomeSMCats','OffSMCats','downCats','homeWinProbSM','awayWinProbSM','homeCLOdds','homePriorOdds','HomeWinOdds','AwayWinOdds','OffWinOdds','DefWinOdds','HomeBayesWinProb','OffBayesWinProb','TimeoutsRemaining_Home','TimeoutsRemaining_Visitor','TimeoutsRemaining_Offense','TimeoutsRemaining_Defense','HomeVegasPredScore_TimeAdj','AwayVegasPredScore_TimeAdj','OffVegasPredScore_TimeAdj','DefVegasPredScore_TimeAdj']]
+
+
+devalt.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data/devalBayes2003_2014_Trim_Home.csv") #export data as csv
+
+
+dey = deval[(deval['season']==2004) | (deval['season']==2006) | (deval['season']==2008) | (deval['season']==2010) | (deval['season']==2012) | (deval['season']==2014)]
+dey['lnHomeWinOdds'] = np.log(dey['HomeWinOdds'])
+
+#Use Bayes win probability to predict actual outcome to test reliability
+Y1 = dey['HomeWinInd']
+m1 = ['lnHomeWinOdds']
+X1 = sm.add_constant(dey[m1])
+results1 = sm.GLM(Y1, X1, family=sm.families.Binomial()).fit()
+print(results1.summary())
+
+#Export results as csv
+result_df = pd.DataFrame({'params': results1.params,
+                              'pvals': results1.pvalues,
+                              'SE': results1.bse})
+result_df.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Thesis/6Results/Validate_BayesWP_Home_OddYearsCL_withTOsandOU.csv") #export data as csv
