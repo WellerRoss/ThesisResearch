@@ -1,0 +1,225 @@
+#Representativeness Test
+
+#modules
+import sys, os
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import pylab
+import statsmodels.api as sm
+import scipy as sp
+import sklearn as sk
+import patsy
+from statsmodels.formula.api import ols
+
+pd.set_option("display.max_rows",10)
+pd.set_option("display.max_columns",200)
+
+#global variables
+pathData = 'C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data'
+dataFile = 'd4evalActDecCL.csv'
+#dataFile = 'd4evalActDecCL_A.csv'
+#dataFile = 'd4evalActDecCL_B.csv'
+
+#import data and read csv
+data = pathData + '/' + dataFile
+d4eval = pd.read_csv(data, low_memory=False) #read csv
+d4eval = d4eval[(d4eval['season']==2004) | (d4eval['season']==2006) | (d4eval['season']==2008) | (d4eval['season']==2010) | (d4eval['season']==2012) | (d4eval['season']==2014)]
+
+
+#Use a multinomial logit to see how coaches weight old and new info in their decision making
+#Y3 = d4eval['actDec']
+#m3 = ['OffWinOdds', 'OffDecCLOdds']
+#X3 = sm.add_constant(d4eval[m3])
+#results3 = sm.MNLogit(Y3, X3).fit(method='bfgs')
+#results3.classes_
+#print(results3.summary())
+#results3.params
+
+d4eval['awayCLOdds'] = (d4eval['awayWinProbSM'] / d4eval['homeWinProbSM'])
+d4eval['offVegasWinOdds'] = (d4eval['OffVegasWinProb'] / (1-d4eval['OffVegasWinProb']))
+d4eval['offCLodds'] = d4eval.apply(lambda x:x['homeCLOdds'] if (x['PossessionTeam'] == x['HomeTeam']) else x['awayCLOdds'], axis=1)
+
+#OffDecCLOdds = DM CL (MNLogit - Actual Decision)
+#OffWinOdds = IG WP
+#offVegasWinOdds = PG WP
+#offCLodds = IG CL (Win Model CL)
+#FDADecCLOdds = DM CL FDA (Logit)
+#OffWinProbFDA_MNL = DM CL FDA (MNLogit)
+
+d4eval['logOddsNewInfo'] = np.log(d4eval['OffWinOdds'])
+d4eval['logOddsOldInfo'] = np.log(d4eval['FDADecCLOdds'])
+#d4eval['logOddsPost'] = np.log(d4eval['OffWinOddsDec'])
+#d4eval['ProbPost'] = d4eval['OffWinOddsDec']/(1 + d4eval['OffWinOddsDec'])
+
+Y1 = d4eval['OffWinInd']
+m1 = ['logOddsNewInfo', 'logOddsOldInfo']
+X1 = sm.add_constant(d4eval[m1])
+results1 = sm.GLM(Y1, X1, family=sm.families.Binomial()).fit()
+print(results1.summary())
+#wald_test(results1)
+
+Y2 = d4eval['Play_SCRIM']
+m2 = ['logOddsPrior', 'logOddsCL']
+X2 = sm.add_constant(d4eval[m2])
+results2 = sm.GLM(Y2, X2, family=sm.families.Binomial()).fit()
+print(results2.summary())
+
+Y3 = d4eval['OffWinInd']
+#Y3 = d4eval['actDec']
+m3 = ['logOddsPrior', 'logOddsCL']
+X3 = sm.add_constant(d4eval[m3])
+results3 = sm.MNLogit(Y3, X3).fit(method='bfgs')
+print(results3.summary())
+results3.params
+
+#dinf = dm[np.isinf(dm['lnMinFromStart'])]
+#dinf = dinf.sort(['season','GameKey','Sequence'], ascending=[True,True,True])
+#dnan = d4eval[np.isnan(d4eval['logOddsPrior'])]
+#dnan = dnan.sort(['season','GameKey','Sequence'], ascending=[True,True,True])
+
+d4eval.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data/d4evalFinal.csv") #export data as csv
+
+
+
+
+
+
+###############################################
+#Evaluate by each quarter
+
+d41q = d4eval[(d4eval['Quarter']==1)]
+d42q = d4eval[(d4eval['Quarter']==2)]
+d43q = d4eval[(d4eval['Quarter']==3)]
+d44q = d4eval[(d4eval['Quarter']==4)]
+
+
+Y1 = d43q['OffWinInd']
+m1 = ['logOddsNewInfo', 'logOddsOldInfo']
+X1 = sm.add_constant(d43q[m1])
+results1 = sm.GLM(Y1, X1, family=sm.families.Binomial()).fit()
+print(results1.summary())
+
+
+###############################################
+#Evaluate by each team
+
+d4eval['PossessionTeam'].unique()
+#['NE', 'IND', 'JAX', 'BUF', 'CHI', 'DET', 'CLV', 'BLT', 'HST', 'SD',
+#       'TEN', 'MIA', 'SEA', 'NO', 'CIN', 'NYJ', 'OAK', 'PIT', 'ARZ', 'SL',
+#       'TB', 'WAS', 'DAL', 'MIN', 'NYG', 'PHI', 'ATL', 'SF', 'DEN', 'KC',
+#       'GB', 'CAR']
+team = "CAR"
+dtm = d4eval[(d4eval['PossessionTeam']==team)]
+
+Y1 = dtm['OffWinInd']
+m1 = ['logOddsNewInfo', 'logOddsOldInfo']
+X1 = sm.add_constant(dtm[m1])
+results1 = sm.GLM(Y1, X1, family=sm.families.Binomial()).fit()
+print(results1.summary())
+
+result_df = pd.DataFrame({'params': results1.params,
+                              'pvals': results1.pvalues,
+                              'SE': results1.bse})
+result_df['Team'] = team
+result_df.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Thesis/6Results/HypTest_Team_CAR.csv") #export data as csv
+
+
+###############################################
+#Evaluate by each year
+
+year = 2014
+dyr = d4eval[(d4eval['season']==year)]
+
+Y1 = dyr['OffWinInd']
+m1 = ['logOddsNewInfo', 'logOddsOldInfo']
+X1 = sm.add_constant(dyr[m1])
+results1 = sm.GLM(Y1, X1, family=sm.families.Binomial()).fit()
+print(results1.summary())
+
+result_df = pd.DataFrame({'params': results1.params,
+                              'pvals': results1.pvalues,
+                              'SE': results1.bse})
+result_df['Year'] = year
+result_df.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Thesis/6Results/HypTest_Year_2014.csv") #export data as csv
+
+
+###############################################
+#Evaluate by each home/away
+dha = d4eval[(d4eval['isOffHome']==0)]
+
+Y1 = dha['OffWinInd']
+m1 = ['logOddsNewInfo', 'logOddsOldInfo']
+X1 = sm.add_constant(dha[m1])
+results1 = sm.GLM(Y1, X1, family=sm.families.Binomial()).fit()
+print(results1.summary())
+
+result_df = pd.DataFrame({'params': results1.params,
+                              'pvals': results1.pvalues,
+                              'SE': results1.bse})
+result_df['Team'] = "Away"
+result_df.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Thesis/6Results/HypTest_Away.csv") #export data as csv
+
+
+
+
+###############################################
+#Evaluate by individual coach
+
+d4eval['OffHeadCoach'].unique()
+#['Butch Davis', 'Dennis Erickson', 'Mike Holmgren', 'Mike Martz', 'Gregg Williams', 'Dave Wannstedt', 'Bill Callahan',
+#       'Mike Shanahan', 'Dick Vermeil', 'Brian Billick', 'Andy Reid', 'Dan Reeves', 'John Fox', 'Marvin Lewis', 'Jack Del Rio',
+#       'Dom Capers', 'Mike Tice', nan, 'Bill Cowher', 'Jeff Fisher', 'Dave McGinnis', 'Steve Spurrier', 'Bill Belichick',
+#       'Steve Mariucci', 'Herman Edwards', 'Bill Parcells', 'Jim Haslett', 'Tony Dungy', 'Mike Sherman', 'Dick Jauron', 'Marty Schottenheimer',
+#       'Jim Fassel', 'Jon Gruden', 'Bil Callahan', 'John Gruden', 'Herm Edwards', 'Don Capers', 'John Fox ', 'Dave MCginnis',
+#       'Marty Shottenheimer', 'Heimerdinger, Mike', 'Reeves, Dan', 'Wade Phillips', 'Jack DelRio', 'Mike Mularkey', 'Lovie Smith',
+#       'Norv Turner', 'Dennis Green', 'Joe Gibbs', 'Tom Coughlin', 'Jim Mora', 'Green, Dennis', 'Mora, Jim', 'Jim Hasletrt',
+#       'Mariucci, Steve', 'Stadium Mariucci', 'Mike Holgren', 'Dick Vemeil', 'Mike Mullarkey', 'Jim Bates', 'Terry Robiskie',
+#       'JeffJish', 'Terry Robiske', 'jon Gruden', 'Bill Paracells', 'Romeo Crennel', 'Nick Saban', 'Mike Nolan', 'Dungy', 'Billick',
+#       'Dick Vermiel', 'Jim Mora Jr.', 'Mike TICE', 'Jim MORA', 'Bill BELICHICK', 'Jim Hasslet', 'Nick Faban', 'Joe Vitt (Interim)',
+#       'Mike Martz; Joe Vitt - Interim Head Coach', 'Mike Shanhan', 'Herm EDWARDS', 'MORA, Jim', 'SHERMAN, Mike',
+#       'Joe Vitt (Interim Head Coach)', 'GRUDEN, Jim', 'Cowher', 'Dick Vermil', 'Mike Martz; Joe Vitt Interim Head Coach',
+#       'Mike Mulakey', 'Jeff fisher', 'Jim HASLETT', 'Bill Cower', 'JimHaslett', 'Joe Vitt Interim Head Coach', 'Sean Payton',
+#       'Rod Marinelli', 'Mike McCarthy', 'Gary Kubiak', 'Scott Linehan', 'Eric Mangini', 'Art Shell', 'Brad Childress', 'GRUDEN, JON',
+#       'MORA,JIM', 'Jon Fox', 'GREEN, DENNIS', 'MORA, JIM', 'Nick Sabin', 'COWHER, Bill', 'Mike MvCarthy', 'Bill Shanahan', 'Crennel, Romeo',
+#       'Nick Saben', 'PAYTON, Sean', 'Romeo Crennell', 'Jakc Del Rio', 'Tom Coughlin ', 'Parcells, Bill', 'FOX, John', 'Romel Crennel',
+#       'Mike Tomlin', 'Bobby Petrino', 'Cam Cameron', 'Lane Kiffin', 'Bill Billick', 'Ken Whisenhunt', 'Linehan, Scott', 'Gruden, Jon',
+#       'John FOX', 'Bobby PETRINO', 'PETRINO, Bobby', 'KUBIAK, Gary', 'Whisenhent, Ken', 'Tomlin, Mike', 'Romeo Crenell', 'Fox, John',
+#       'Whisenhunt, Ken', 'COUGHLIN, Tom', 'NOLAN, Mike', 'Marinelli, Rod', 'Petrino, Bobby', 'Ken Wisenhunt', 'Rob Marinelli', 'Nolan, Mike',
+#       'Dungy, Tony', 'John fox', 'Sean payton', 'Mike Nolan ', 'Jack  Del Rio', 'Kiffin, Lane', 'Shanahan, Mike', 'Emmitt Thomas (Interim)', 'Marvin Lews', 'Kubiak, Gary',
+#       'Thomas, Emmittt', 'THOMAS, Emmit', 'HOLMGREN, Mike', 'Jim Zorn', 'MARINELLI, Rod', 'SMITH, Mike', 'John Harbaugh', 'Tony Sparano',
+#       'Smith, Lovie', 'Mike Smith', 'Sparano, Tony', 'EDWARDS, Herm', 'Del Rio, Jack', 'Turner, Norv', 'Jauron, Dick', 'Smith, Mike',
+#       'Harbaugh, John', 'Tom Cable', 'Phillips, Wade', 'Edwards, Herm', 'Fisher, Jeffrey', 'Mangini, Eric', 'Cable, Tom', 'Mike Singletary',
+#       'Belichick, Bill', 'Singletary, Mike', 'SHANAHAN, Mike', ' Jeff Fisher', 'Coughlin, Tom', 'Lewis, Marvin', 'Haslett, Jim',
+#       'Childress, Brad', 'HASLETT, Jim', 'Fisher, Jeff', 'Holmgren, Mike', 'SPARANO, Tony', 'Todd Haley', 'AndyReid', 'Josh McDaniels',
+#       'Rex Ryan', 'Caldwell, Jim', 'Jim Schwartz', 'Raheem Morris', 'Steve Spagnuolo', 'Jim Caldwell', 'McDaniels, Josh',
+#       'Spagnuolo, Steve', 'Tom Calbe', 'Mike Smith ', 'Perry Fewell', 'REID, Andy', 'Schwartz, Jim', 'FEWELL, Perry', 'Jack Delrio',
+#       'John Harbaugh ', 'Ryan, Rex', 'Zorn, Jim', 'Belichick', 'Kubiak', 'McCarthy, Mike', 'Tom Cable ', 'Morris, Raheem', 'Pete Carroll',
+#       'Chan Gailey', 'Jason Garrett', 'Gary Kubiac', 'Haley, Todd', 'Raheem Morros', 'Payton, Sean', 'Leslie Frazier', 'Garrett, Jason',
+#       'Carroll, Pete', 'Studesville, Eric', 'Eric Studsville', 'Eric Studesville', 'Jim Tomsula', 'Pat Shurmur', 'Mike Munchak',
+#       'Rivera, Ron', 'Jim Harbaugh', 'Hue Jackson', 'Ron Rivera', 'Shurmur, Pat', 'Leslie Frasier', 'Hugh Jackson', 'Mike Munchack',
+#       'Tood Haley', 'Msrvin Lewis', 'Jim Scwartz', 'Munchak, Mike', 'John Harabugh', 'Frazier, Leslie', 'Mel Tucker', 'Tucker, Mel',
+#       'Todd Bowles', 'Steve Spanguolo', 'Mikw Tomlin', 'Chuck Pagano', 'Joe Philbin', 'Schiano, Greg', 'Dennis Allen', 'Pagano, Chuck',
+#       'Greg Schiano', 'Tom Couglin', 'Mularkey, Mike', 'Reid, Andy', 'Jom Schwartz', 'Philbin, Joe', 'Dennis Alllen', 'Aaron Kromer',
+#       'Pagano, Chuck/Arians, Bruce (Interim)', 'Kromer, Aaron', 'Pat Schurmur', 'Schiano,Greg', 'Joe Vitt', 'Pagano, Chuck/Arians, Bruce (interim)', 'Gailey, Chan',
+#       'Pat Shumur', 'Leslie Frazer', 'Dennis Allen ', 'Doug Marrone', 'Marc Trestman', 'Rob Chudzinski', 'Allen, Dennis', 'Bradley, Gus',
+#       'Bruce Arians', 'Tom Goughlin', 'Chip Kelly', 'Mike McCoy', 'Kelly, Chip', 'McCoy, Mike', 'Gus Bradley', ' Pete Carroll',
+#       'Arians, Bruce', 'River, Ron', ' Andy Reid', 'Ryan, Buddy', 'Greg Schano', 'Marrone, Doug', 'Harbaugh, Jim', 'Mike MCCarthy',
+#       'Arias, Bruce', 'Bill OBrien', 'Jay Gruden', 'Mike Pettine', 'Mike Zimmer', 'Gruden, Jay', 'Pagano, Chuk', 'Bradley, Guss',
+#       'Mike Patton', 'Zimmer, Mike', 'Jim Cadwell', 'Joe Philben', 'Marc Testman', 'Gus Williams', 'OBrien, Bill', 'Whisenhunt, Gus']
+
+dcoach = d4eval[(d4eval['OffHeadCoach']=="Andy Reid") | (d4eval['OffHeadCoach']=="AndyReid") |  (d4eval['OffHeadCoach']=="REID, Andy") |  (d4eval['OffHeadCoach']=="Reid, Andy") |  (d4eval['OffHeadCoach']==" Andy Reid")]
+
+Y1 = dcoach['OffWinInd']
+m1 = ['logOddsNewInfo', 'logOddsOldInfo']
+X1 = sm.add_constant(dcoach[m1])
+results1 = sm.GLM(Y1, X1, family=sm.families.Binomial()).fit()
+print(results1.summary())
+
+result_df = pd.DataFrame({'params': results1.params,
+                              'pvals': results1.pvalues,
+                              'SE': results1.bse})
+result_df['Coach'] = "AndyReid"
+result_df.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Thesis/6Results/HypTest_Coach_AndyReid.csv") #export data as csv
+
+
