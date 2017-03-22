@@ -28,15 +28,7 @@ dm = dm.rename(columns={'Unnamed: 0': 'unique'})
 
 # trim data set
 dm = dm[dm.Quarter != 5]
-#dm = dm[dm.season >= 2013]
-#d4 = dm[dm['Down']==4]
-#dfg = d4[d4['PlayCall']=='FG']
-#dpt = d4[d4['PlayCall']=='PUNT']
-#dfg = dfg[['PlayDescription','AbsoluteYardline']]
-#dpt = dpt[['PlayDescription','AbsoluteYardline']]
-#dfg.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data/dfg.csv")  # export data as csv
-#dpt.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data/dpt.csv")  # export data as csv
-#dpt['AbsoluteYardline'].describe()
+
 #Create columns for each play and game to have a unique number/id
 dm['MinFromStart'] = 60 - dm['MinutesRemaining']
 dm['unique'] = dm["season"].map(str) + dm["GameKey"].map(str) + dm["MinFromStart"].map(str)
@@ -48,16 +40,6 @@ dme = dm[
      'AbsoluteYardline', 'ClockTime', 'MinutesRemaining', 'MinFromStart', 'Score_Home', 'Score_Visitor', 'Score_Offense',
      'Score_Defense', 'OffScoreMargin', 'DefScoreMargin', 'TimeoutsRemaining_Home', 'TimeoutsRemaining_Visitor', 'TimeoutsRemaining_Offense',
      'TimeoutsRemaining_Defense', 'OffWinInd', 'OffLossInd', 'OffTieInd', 'PlayCall','Down4Success']]
-dme.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data/trimmedThesisData2003_2014.csv")  # export data as csv
 
-# Eliminate overtime
-#dm = dm[dm.Quarter != 5]
-
-# Make everything in the description column lowercase
-# dm['PlayDescription'] = dm['PlayDescription'].str.lower()
-
-# sort the data so it's in chronological order
-#dm['MinFromStart'] = 60 - dm['MinutesRemaining']
-#dm = dm.sort(['season', 'GameKey', 'MinFromStart'], ascending=[True, True, True])
-#dm = dm[dm.season >= 2013]
-#dm.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data/thesisData2013_2014.csv")  # export data as csv
+# export data as csv
+dme.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data/trimmedThesisData2003_2014.csv")  
