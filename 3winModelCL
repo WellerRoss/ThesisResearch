@@ -1,0 +1,157 @@
+#WP Conditional Likelihood model
+
+#modules
+import sys, os
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import pylab
+import statsmodels.api as sm
+import scipy as sp
+import sklearn as sk
+import patsy
+from statsmodels.formula.api import ols
+
+from statsmodels.compat.python import range, lrange, lmap, lzip, zip_longest
+import numpy as np
+from statsmodels.iolib.table import SimpleTable
+from statsmodels.iolib.tableformatting import (gen_fmt, fmt_2,
+                                                fmt_params, fmt_base, fmt_2cols)
+
+pd.set_option("display.max_rows",10)
+pd.set_option("display.max_columns",200)
+
+#global variables
+pathData = 'C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data'
+dataFile = 'thesisData2003_2014_AddedVariables_Trim.csv' #Main data file
+#dataFile = 'thesisData2003_2008_AddedVariables_Trim.csv' #First six years
+#dataFile = 'thesisData2009_2014_AddedVariables_Trim.csv' #Last six years
+#dataFile = 'thesisData_OddYears_AddedVariables_Trim.csv' #Odd years
+#dataFile = 'thesisData_EvenYears_AddedVariables_Trim.csv' #Even years
+
+#import data and read csv
+data = pathData + '/' + dataFile
+dm = pd.read_csv(data, low_memory=False) #read csv
+#varlist = dm.columns.tolist()
+
+#dm['HomeSMCats'] = pd.cut(dm['homeSM'], bins=[-99,-17,-9,-1,0,8,16,99], labels=['dn3pos','dn2pos','dn1pos','tied','up1pos','up2pos','up3pos'])
+#dm = dm.sort(['unique','Down','Play_KO']).reset_index()
+
+#Get data to use for win probability model
+#df6 = dm[dm['season']<=2008]
+#dr6 = dm[dm['season']>=2009]
+doy = dm[(dm['season']==2003) | (dm['season']==2005) | (dm['season']==2007) | (dm['season']==2009) | (dm['season']==2011) | (dm['season']==2013)]
+#dey = dm[(dm['season']==2004) | (dm['season']==2006) | (dm['season']==2008) | (dm['season']==2010) | (dm['season']==2012) | (dm['season']==2014)]
+
+#d13['HomeSMCats'] = pd.cut(d13['homeSM'], bins=[-99,-9,-1,0,8,99], labels=['dn2pos','dn1pos','tied','up1pos','up2pos'])
+#dcheck = d13[['homeSM','HomeSMCats']]
+#dcheck = pd.DataFrame(dcheck.groupby(['homeSM', 'HomeSMCats'], axis=0,  as_index=False).last())
+#dcheck = dcheck[(dcheck.homeSM==-17) | (dcheck.homeSM==-16) | (dcheck.homeSM==-9) | (dcheck.homeSM==-8) | (dcheck.homeSM==-1) |
+#                (dcheck.homeSM==0) |
+#                (dcheck.homeSM==1) | (dcheck.homeSM==8) | (dcheck.homeSM==9) | (dcheck.homeSM==16) | (dcheck.homeSM==17)]
+
+dh = doy[doy['HomeWinInd']==1]
+da = doy[doy['HomeWinInd']==0]
+
+#varlist = dh.columns.tolist()
+Y2 = dh['HomeSMCats']
+m2 = ['lnminrem','lnhomeydline','Play_KO','D_2','D_3','D_4','Play_XP','lnYardsToGo','isOffHome','TimeoutsRemaining_Home', 'TimeoutsRemaining_Visitor','HomeVegasPredScore_TimeAdj','AwayVegasPredScore_TimeAdj']
+X2 = sm.add_constant(dh[m2])
+results2 = sm.MNLogit(Y2, X2).fit(method='bfgs')
+print(results2.summary())
+results2.params
+results2.save("MNL_homeSM_win.pickle")
+results2.summary(returns='latex')
+
+coeff = results2.params
+results_df = pd.DataFrame({"coeff":coeff}, index=[1])
+coeff.shape
+coeff.columns = coeff.iloc[0]
+coeff = coeff.drop(coeff.index[[0]])
+
+########################################################################################################################
+########################################################################################################################
+########################################################################################################################
+#
+#STOP HERE TO COPY AND PASTE RESULTS TO A TXT FILE
+#
+########################################################################################################################
+########################################################################################################################
+########################################################################################################################
+
+Xnew = sm.add_constant(dm[m2])
+fitted = pd.DataFrame(results2.predict(Xnew))
+fitted.columns=['dn1pos','dn2pos','dn3pos','tied','up1pos','up2pos','up3pos']
+
+#fitted[Y2=='tied']
+test = dm[['lnminrem','lnhomeydline','Play_KO','D_2','D_3','D_4','Play_XP','lnYardsToGo','isOffHome','TimeoutsRemaining_Home','TimeoutsRemaining_Visitor','HomeVegasPredScore_TimeAdj','AwayVegasPredScore_TimeAdj','HomeSMCats']]
+#test = dm[['MinutesRemaining','AbsoluteYardline','Down','YardsToGo','posCats','HomeSMCats']]
+test = test.reset_index()
+
+#fitted2 = fitted.reshape((-1,7))
+#probs = pd.DataFrame({'tied':fitted2[:,0],'dn1pos':fitted2[:,1],'dn2pos':fitted2[:,2],'dn3pos':fitted2[:,3],'up1pos':fitted2[:,4],'up2pos':fitted2[:,5],'up3pos':fitted2[:,6]})
+result = pd.concat([test, fitted], axis=1)
+
+def func(row):
+    if row['HomeSMCats'] == 'dn3pos':
+        return row['dn3pos']
+    elif row['HomeSMCats'] =='dn2pos':
+        return row['dn2pos']
+    elif row['HomeSMCats'] =='dn1pos':
+        return row['dn1pos']
+    elif row['HomeSMCats'] =='up1pos':
+        return row['up1pos']
+    elif row['HomeSMCats'] =='up2pos':
+        return row['up2pos']
+    elif row['HomeSMCats'] =='up3pos':
+        return row['up3pos']
+    else:
+        return row['tied']
+
+result['homeWinProbSM'] = result.apply(func, axis=1)
+
+merge = result[['homeWinProbSM']]
+
+dhsmp = pd.concat([dm, merge], axis=1)
+
+
+Y2 = da['HomeSMCats']
+m2 = ['lnminrem','lnhomeydline','Play_KO','D_2','D_3','D_4','Play_XP','lnYardsToGo','isOffHome','TimeoutsRemaining_Home', 'TimeoutsRemaining_Visitor','HomeVegasPredScore_TimeAdj','AwayVegasPredScore_TimeAdj']
+X2 = sm.add_constant(da[m2])
+results2 = sm.MNLogit(Y2, X2).fit(method='bfgs')
+print(results2.summary())
+results2.save("MNL_homeSM_loss.pickle")
+
+########################################################################################################################
+########################################################################################################################
+########################################################################################################################
+#
+#STOP HERE TO COPY AND PASTE RESULTS TO A TXT FILE
+#
+########################################################################################################################
+########################################################################################################################
+########################################################################################################################
+
+Xnew = sm.add_constant(dm[m2])
+fitted = pd.DataFrame(results2.predict(Xnew))
+fitted.columns=['dn1pos','dn2pos','dn3pos','tied','up1pos','up2pos','up3pos']
+
+#fitted[Y2=='tied']
+test = dm[['lnminrem','lnhomeydline','Play_KO','D_2','D_3','D_4','Play_XP','lnYardsToGo','isOffHome','TimeoutsRemaining_Home','TimeoutsRemaining_Visitor','HomeVegasPredScore_TimeAdj','AwayVegasPredScore_TimeAdj','HomeSMCats']]
+test = test.reset_index()
+
+#fitted2 = fitted.reshape((-1,7))
+#probs = pd.DataFrame({'tied':fitted2[:,0],'dn1pos':fitted2[:,1],'dn2pos':fitted2[:,2],'dn3pos':fitted2[:,3],'up1pos':fitted2[:,4],'up2pos':fitted2[:,5],'up3pos':fitted2[:,6]})
+result = pd.concat([test, fitted], axis=1)
+
+result['awayWinProbSM'] = result.apply(func, axis=1)
+
+merge = result[['awayWinProbSM']]
+
+deval = pd.concat([dhsmp, merge], axis=1)
+
+deval['homeWinProbSM'] = deval.apply(lambda x:0.5 if (x['Play_KO'] == 1 and x['MinutesRemaining']==60 and x['homeSM']==0) else x['homeWinProbSM'], axis=1)
+deval['awayWinProbSM'] = deval.apply(lambda x:0.5 if (x['Play_KO'] == 1 and x['MinutesRemaining']==60 and x['homeSM']==0) else x['awayWinProbSM'], axis=1)
+
+
+deval.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data/thesisData2003_2014_deval_Home_OddYearsCL_withTOsandOU.csv") #export data as csv
