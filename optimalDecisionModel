@@ -1,0 +1,205 @@
+#Optimal Decision
+
+#modules
+import sys, os
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import pylab
+import statsmodels.api as sm
+import scipy as sp
+import sklearn as sk
+import patsy
+from statsmodels.formula.api import ols
+
+pd.set_option("display.max_rows",10)
+pd.set_option("display.max_columns",200)
+
+#global variables
+pathData = 'C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data'
+dataFile = 'devalBayes2003_2014_Trim_Home.csv'
+#dataFile = 'devalBayes2003_2014_Trim_Offense.csv'
+
+#import data and read csv
+data = pathData + '/' + dataFile
+deval = pd.read_csv(data, low_memory=False) #read csv
+
+deval['OffYdLineCats'] = pd.cut(deval['OffAbsYdLine'], bins=[0,35,64,99], labels=['FGrange','midFld','ownTerr'])
+
+#deval['TimeoutsRemaining_Offense'] = deval.apply(lambda x:x['TimeoutsRemaining_Home'] if (x['isOffHome'] == 1) else x['TimeoutsRemaining_Visitor'], axis=1)
+#deval['TimeoutsRemaining_Defense'] = deval.apply(lambda x:x['TimeoutsRemaining_Visitor'] if (x['isOffHome'] == 1) else x['TimeoutsRemaining_Home'], axis=1)
+#deval['OffVegasPredScore_TimeAdj'] = deval.apply(lambda x:x['HomeVegasPredScore_TimeAdj'] if (x['isOffHome'] == 1) else x['AwayVegasPredScore_TimeAdj'], axis=1)
+#deval['DefVegasPredScore_TimeAdj'] = deval.apply(lambda x:x['AwayVegasPredScore_TimeAdj'] if (x['isOffHome'] == 1) else x['HomeVegasPredScore_TimeAdj'], axis=1)
+
+#Create fourth down data frame
+d4 = deval[deval['Down']==4]
+d13 = d4[(d4['season']==2003) | (d4['season']==2005) | (d4['season']==2007) | (d4['season']==2009) | (d4['season']==2011) | (d4['season']==2013)]
+
+#Generate a table to shows the odds of winning in the different scenarios
+d4table = pd.DataFrame(d4.groupby(['Quarter','OffSMCats','OffYdLineCats'], axis=0,  as_index=False).mean())
+d4table = d4table[['Quarter','OffSMCats','OffYdLineCats','OffWinOdds']]
+d4table.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data/d4table2003_2014.csv") #export data as csv
+
+#Split fourth down data into wins and non-wins
+d4w = d13[d13['OffWinInd']==1]
+d4l = d13[d13['OffWinInd']==0]
+#varlist = d4w.columns.tolist()
+
+#Field Goal Attempt Conditional Likelihood
+Y6 = d4w['Play_FG']
+m6 = ['lnminrem','OffScoreMargin','lnoffydline','lnYardsToGo','isOffHome','TimeoutsRemaining_Offense', 'TimeoutsRemaining_Defense','OffVegasPredScore_TimeAdj','DefVegasPredScore_TimeAdj']
+#m6 = ['lnminrem','OffScoreMargin','lnoffydline','lnYardsToGo','isOffHome','TimeoutsRemaining_Home', 'TimeoutsRemaining_Visitor','HomeVegasPredScore_TimeAdj','AwayVegasPredScore_TimeAdj']
+X6 = sm.add_constant(d4w[m6])
+#results6 = sm.OLS(Y6, X6).fit()
+results6 = sm.GLM(Y6, X6, family=sm.families.Binomial()).fit()
+d4w['OffWinProbFGA'] = results6.predict(X6)
+#print(results6.summary())
+Xnew = sm.add_constant(d4[m6])
+d4['OffWinProbFGA'] = results6.predict(Xnew)
+
+result_df = pd.DataFrame({'params': results6.params,
+                              'pvals': results6.pvalues,
+                              'SE': results6.bse})
+result_df.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Thesis/6Results/FGAwinLogitCLResultsSummary.csv") #export data as csv
+results6.save("FGAwinLogit.pickle")
+
+Y7 = d4l['Play_FG']
+m7 = ['lnminrem','OffScoreMargin','lnoffydline','lnYardsToGo','isOffHome','TimeoutsRemaining_Offense', 'TimeoutsRemaining_Defense','OffVegasPredScore_TimeAdj','DefVegasPredScore_TimeAdj']
+X7 = sm.add_constant(d4l[m7])
+#results7 = sm.OLS(Y7, X7).fit()
+results7 = sm.GLM(Y7, X7, family=sm.families.Binomial()).fit()
+d4l['DefWinProbFGA'] = results7.predict(X7)
+#print(results7.summary())
+Xnew = sm.add_constant(d4[m7])
+d4['DefWinProbFGA'] = results7.predict(Xnew)
+
+d4['FGADecCLOdds'] = (d4['OffWinProbFGA'] / d4['DefWinProbFGA'])
+
+result_df = pd.DataFrame({'params': results7.params,
+                              'pvals': results7.pvalues,
+                              'SE': results7.bse})
+result_df.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Thesis/6Results/FGAlossLogitCLResultsSummary.csv") #export data as csv
+results7.save("FGAlossLogit.pickle")
+
+#First Down Attempt Conditional Likelihood
+Y6 = d4w['Play_SCRIM']
+m6 = ['lnminrem','OffScoreMargin','lnoffydline','lnYardsToGo','isOffHome','TimeoutsRemaining_Offense', 'TimeoutsRemaining_Defense','OffVegasPredScore_TimeAdj','DefVegasPredScore_TimeAdj']
+X6 = sm.add_constant(d4w[m6])
+#results6 = sm.OLS(Y6, X6).fit()
+results6 = sm.GLM(Y6, X6, family=sm.families.Binomial()).fit()
+d4w['OffWinProbFDA'] = results6.predict(X6)
+#print(results6.summary())
+Xnew = sm.add_constant(d4[m6])
+d4['OffWinProbFDA'] = results6.predict(Xnew)
+
+result_df = pd.DataFrame({'params': results6.params,
+                              'pvals': results6.pvalues,
+                              'SE': results6.bse})
+result_df.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Thesis/6Results/FDAwinLogitCLResultsSummary.csv") #export data as csv
+results6.save("FDAwinLogit.pickle")
+
+Y7 = d4l['Play_SCRIM']
+m7 = ['lnminrem','OffScoreMargin','lnoffydline','lnYardsToGo','isOffHome','TimeoutsRemaining_Offense', 'TimeoutsRemaining_Defense','OffVegasPredScore_TimeAdj','DefVegasPredScore_TimeAdj']
+X7 = sm.add_constant(d4l[m7])
+#results7 = sm.OLS(Y7, X7).fit()
+results7 = sm.GLM(Y7, X7, family=sm.families.Binomial()).fit()
+d4l['DefWinProbFDA'] = results7.predict(X7)
+#print(results7.summary())
+Xnew = sm.add_constant(d4[m7])
+d4['DefWinProbFDA'] = results7.predict(Xnew)
+
+d4['FDADecCLOdds'] = (d4['OffWinProbFDA'] / d4['DefWinProbFDA'])
+
+result_df = pd.DataFrame({'params': results7.params,
+                              'pvals': results7.pvalues,
+                              'SE': results7.bse})
+result_df.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Thesis/6Results/FDAlossLogitCLResultsSummary.csv") #export data as csv
+results7.save("FDAlossLogit.pickle")
+
+#Punt Decision Conditional Likelihood
+Y6 = d4w['Play_PUNT']
+m6 = ['lnminrem','OffScoreMargin','lnoffydline','lnYardsToGo','isOffHome','TimeoutsRemaining_Offense', 'TimeoutsRemaining_Defense','OffVegasPredScore_TimeAdj','DefVegasPredScore_TimeAdj']
+X6 = sm.add_constant(d4w[m6])
+#results6 = sm.OLS(Y6, X6).fit()
+results6 = sm.GLM(Y6, X6, family=sm.families.Binomial()).fit()
+d4w['OffWinProbPNT'] = results6.predict(X6)
+#print(results6.summary())
+Xnew = sm.add_constant(d4[m6])
+d4['OffWinProbPNT'] = results6.predict(Xnew)
+
+result_df = pd.DataFrame({'params': results6.params,
+                              'pvals': results6.pvalues,
+                              'SE': results6.bse})
+result_df.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Thesis/6Results/PNTwinLogitCLResultsSummary.csv") #export data as csv
+results6.save("PNTwinLogit.pickle")
+
+Y7 = d4l['Play_PUNT']
+m7 = ['lnminrem','OffScoreMargin','lnoffydline','lnYardsToGo','isOffHome','TimeoutsRemaining_Offense', 'TimeoutsRemaining_Defense','OffVegasPredScore_TimeAdj','DefVegasPredScore_TimeAdj']
+X7 = sm.add_constant(d4l[m7])
+#results7 = sm.OLS(Y7, X7).fit()
+results7 = sm.GLM(Y7, X7, family=sm.families.Binomial()).fit()
+d4l['DefWinProbPNT'] = results7.predict(X7)
+#print(results7.summary())
+Xnew = sm.add_constant(d4[m7])
+d4['DefWinProbPNT'] = results7.predict(Xnew)
+
+d4['PNTDecCLOdds'] = (d4['OffWinProbPNT'] / d4['DefWinProbPNT'])
+
+result_df = pd.DataFrame({'params': results7.params,
+                              'pvals': results7.pvalues,
+                              'SE': results7.bse})
+result_df.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Thesis/6Results/PNTlossLogitCLResultsSummary.csv") #export data as csv
+results7.save("PNTlossLogit.pickle")
+
+#Bayes in odds form for each decision
+d4['OffWinOddsFGA'] = d4['OffWinOdds']*d4['FGADecCLOdds']
+d4['OffWinOddsFDA'] = d4['OffWinOdds']*d4['FDADecCLOdds']
+d4['OffWinOddsPNT'] = d4['OffWinOdds']*d4['PNTDecCLOdds']
+
+#Find the best odds
+d4['optimalOdds'] = d4[['OffWinOddsFGA', 'OffWinOddsFDA', 'OffWinOddsPNT']].max(axis=1)
+d4['optimalOddsFDAvsFGA'] = d4[['OffWinOddsFGA', 'OffWinOddsFDA']].max(axis=1)
+d4['optimalOddsFDAvsPNT'] = d4[['OffWinOddsFDA', 'OffWinOddsPNT']].max(axis=1)
+#d4['optimalOdds2'] = deval.apply(lambda x:x[['OffWinOddsFDA', 'OffWinOddsPNT']].max(axis=1) if (x['OffAbsYdLine'] > 46) else x['optimalOdds'], axis=1)
+
+def func(row):
+    if row['OffAbsYdLine'] > 46:
+        return row['optimalOddsFDAvsPNT']
+    elif row['OffAbsYdLine'] < 27:
+        return row['optimalOddsFDAvsFGA']
+    else:
+        return row['optimalOdds']
+d4['optimalOdds2'] = d4.apply(func, axis=1)
+
+
+
+#Create column that tells which decision has best odds
+def func(row):
+    if row['optimalOdds'] == row['OffWinOddsFGA']:
+        return 'FGA'
+    elif row['optimalOdds'] == row['OffWinOddsFDA']:
+        return 'FDA'
+    else:
+        return 'PNT'
+d4['optDec'] = d4.apply(func, axis=1)
+
+def func2(row):
+    if row['optimalOdds2'] == row['OffWinOddsFGA']:
+        return 'FGA'
+    elif row['optimalOdds2'] == row['OffWinOddsFDA']:
+        return 'FDA'
+    else:
+        return 'PNT'
+d4['optDec2'] = d4.apply(func2, axis=1)
+
+#Create column that tells what the actual decision was
+def func3(row):
+    if row['Play_FG'] == 1:
+        return 'FGA'
+    elif row['Play_PUNT'] == 1:
+        return 'PNT' 
+    else:
+        return 'FDA'
+d4['actDec'] = d4.apply(func3, axis=1)
+
+d4.to_csv("C:/Users/Weller/Dropbox/SportAnalytics/3rdAnd4thDown/Data/d4evalOptimalDecision2003_2014.csv") #export data as csv
